@@ -1,0 +1,6 @@
+__pycache__/
+.pytest_cache/
+models/
+logic/
+resultados_benchmark.*
+tabla.md
