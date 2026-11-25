@@ -1,0 +1,15 @@
+# Dependencias de la interfaz de ANTHROSWARM (PROPUESTA: acordar con Jean Pierre antes de subirla al repositorio).
+# Objetivo de ejecución: Windows, Python 3.11, multiprocessing "spawn".
+#
+# Instalación:   python -m pip install -r requirements.txt
+#
+# pygame-ce (fork mantenido de Pygame): el paquete "pygame" original no se probó en Python 3.14.
+# No instalar "pygame" y "pygame-ce" a la vez.
+#
+# Qué está comprobado y qué no:
+#  * Rueda para Windows con Python 3.11 (pygame_ce-2.5.8-cp311-cp311-win_amd64.whl): existe en PyPI
+#    (se pudo descargar); NO se ejecutó en Windows desde aquí.
+#  * pygame-ce 2.5.8 sobre Python 3.11 en LINUX: instalado e importado, y las pruebas pasan.
+#  * En el Windows de Tamara con Python 3.14.6, la salida que ella pegó muestra pygame-ce 2.5.8 importando bien.
+pygame-ce>=2.5.8
+pytest
