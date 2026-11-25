@@ -2,6 +2,8 @@
 
 Responsable: Jean Pierre. Contratos: Anexo A de Mike (firmas definitivas de `models/` y `logic/`).
 
+**Estado:** integrado con la implementación definitiva de `models/` y `logic/` de Mike (commit `4e71fb0`). Todas las pruebas pasan con esa implementación en Windows con `spawn` (ver [Pruebas](#pruebas)).
+
 El motor ejecuta el **paso 2** de `update`. Recibe `(ants, vista)` y devuelve un `AntResult` por hormiga. Lo hace en un solo proceso o repartiendo el trabajo entre varios workers con `multiprocessing`. Los pasos 1 (`crear_vista`) y 3 (`aplicar_resultados`) son de `logic/`.
 
 ```python
@@ -25,7 +27,8 @@ engine/
 ├── benchmark.py       python -m engine.benchmark
 └── README.md
 tests/test_engine_*.py   pruebas del motor (71)
-ejemplos/main_consola.py integración de referencia sin Pygame
+ejemplos/main_consola.py           integración de referencia sin Pygame
+ejemplos/prueba_hilo_secundario.py uso del motor desde un hilo secundario (spawn)
 ```
 
 Dependencias: `engine/` importa `logic/` y `models/`. `logic/` no importa `engine/`, y en `engine/` no hay Pygame.
@@ -84,7 +87,7 @@ with abrir_motor() as motor:          # crea los workers una sola vez
 | Cierre por error | Si hay una excepción o Ctrl+C dentro del `with`: `terminate()` + `join()`, que detiene los workers de inmediato. |
 | Después de cerrar | Usar el ejecutor lanza `ValueError` (Pool cerrado). |
 
-**Método de inicio:** `spawn` por defecto (`METODO_INICIO_POR_DEFECTO`). Es el único que existe en Windows y el de macOS, así todo el equipo ve el mismo comportamiento. En Linux evita los bloqueos de `fork()` cuando el proceso ya tiene hilos (Pygame los crea). Arrancar los intérpretes cuesta unos 70 ms con 2 workers y se paga una sola vez. Para usar el método del sistema: `abrir_motor(metodo_inicio=None)`.
+**Método de inicio:** `spawn` por defecto (`METODO_INICIO_POR_DEFECTO`). Es el único que existe en Windows y el de macOS, así todo el equipo ve el mismo comportamiento. En Linux evita los bloqueos de `fork()` cuando el proceso ya tiene hilos (Pygame los crea). Arrancar los workers se paga una sola vez: en la PC de pruebas con Windows y 8 workers tarda entre 0,4 y 0,5 s. Para usar el método del sistema: `abrir_motor(metodo_inicio=None)`.
 
 > **Obligatorio:** con `spawn`, `main.py` debe tener `if __name__ == "__main__": main()`. Sin eso, cada worker vuelve a ejecutar el programa completo.
 
@@ -132,7 +135,8 @@ Notas:
 - Cambiar de modo no reinicia nada: el Pool sigue vivo (y ocioso) mientras se usa el modo secuencial. El cambio es instantáneo y la simulación sigue desde el mismo `state`.
 - Nunca se abre un motor por frame: crear el Pool es lo más caro del modo paralelo.
 - Para mostrar en pantalla los datos técnicos de la rúbrica: `nucleos_totales()`, `motor.n_workers`, `motor.n_segmentos` y `ESTRATEGIA_PARTICION`.
-- La rúbrica pide `update(state, events, ...)`. Si Mike agrega `events` a la firma, el motor no cambia: sigue entrando como `ejecutor`.
+- Si en algún momento `update` recibe también `events` (la rúbrica menciona `update(state, events, ...)`), el motor no cambia: sigue entrando como `ejecutor`.
+- **Hilo secundario:** el motor funciona usado desde un hilo secundario de la interfaz. Recomendación: abrir el motor en el hilo principal; que solo el hilo de simulación llame a `update` con `ejecutor_paralelo(motor)`; para cerrar, detener ese hilo, hacer `join()` y después salir del `with`. Prueba: `python -m ejemplos.prueba_hilo_secundario`.
 
 Ejemplo ejecutable sin Pygame:
 
@@ -144,10 +148,19 @@ python -m ejemplos.main_consola --modo secuencial --hormigas 3000 --ticks 100
 ## Pruebas
 
 ```bash
+python -m pip install pytest      # solo la primera vez
 python -m pytest tests -q
+python -m ejemplos.prueba_hilo_secundario
 ```
 
-Qué se comprueba:
+**Resultado con la implementación definitiva de Mike** (Windows, Python 3.11.9, `spawn`, commit `12e22a1`):
+
+- `python -m pytest tests -q` → **91 passed in 24.38 s** (71 pruebas del motor y 20 de `models/` y `logic/`).
+- `python -m ejemplos.prueba_hilo_secundario` → motor abierto en el hilo principal y usado desde un hilo secundario: igual al secuencial; motor abierto y cerrado dentro del hilo secundario: igual al secuencial; uso tras cerrar: `ValueError`, como se espera.
+
+Siempre se ejecuta con `python -m` desde la carpeta raíz del proyecto. Con el botón ▶ de VS Code aparece `No module named 'engine'`.
+
+Qué se comprueba en las pruebas del motor:
 
 - **Segmentación:** sobrantes en los primeros segmentos, concatenación igual al original (42 combinaciones de tamaños), sin segmentos vacíos, casos borde y valores inválidos.
 - **Contrato del ejecutor:** un `AntResult` por hormiga y en orden con 1, 2, 3 y 4 workers y con más segmentos que workers; lista vacía; `validar_resultados` detecta faltantes y desorden.
@@ -172,23 +185,31 @@ Imprime los datos técnicos (núcleos totales, núcleos disponibles, workers, se
 
 Aquí **FPS** son los updates por segundo de la simulación, sin contar el dibujo. En la defensa en vivo también se puede mostrar el FPS real de Pygame (`reloj.get_fps()`), que incluye el renderizado.
 
-### Resultados de referencia
+### Resultados medidos en el equipo del proyecto
 
-Máquina de prueba: Linux, Python 3.13, **2 núcleos totales**, 2 workers, `spawn`, partición en bloques contiguos equilibrados. Hay que repetir la medición en el hardware del equipo, que es lo que pide la rúbrica. Con más núcleos el speedup debería subir.
+> Los resultados de rendimiento **dependen del hardware** (cantidad y velocidad de núcleos, memoria, sistema operativo y carga de la máquina en ese momento). En otra computadora los FPS y el speedup serán distintos; la tabla de la rúbrica debe repetirse en el equipo donde se haga la demostración.
 
-Con carga de feromonas (`--precalentar 120 --ticks 20`):
+Máquina: PC de Jean Pierre, **Windows**, Python 3.11.9, **8 núcleos totales y 8 disponibles**, **8 workers**, método `spawn`, 8 segmentos por frame. Partición: bloques contiguos equilibrados, un segmento por worker, cada uno con `n // k` hormigas y los primeros `n % k` con una más, conservando el orden. Lógica: implementación definitiva de Mike.
 
-| Cantidad de entidades | Secuencial (1 núcleo) | Paralelo (2 núcleos) | Speedup | Eficiencia | Equivalentes |
+Comando: `python -m engine.benchmark --ticks 20 --markdown tabla.md` (20 frames, sin precalentamiento, seed 42).
+
+| Cantidad de entidades | Rendimiento secuencial (1 núcleo) | Rendimiento paralelo (8 núcleos) | Speedup | Eficiencia | Equivalentes |
 |---:|---:|---:|---:|---:|:---:|
-| 1.000 | 6,8 FPS | 12,1 FPS | 1,79x | 90 % | sí |
-| 3.000 | 0,8 FPS | 1,6 FPS | 1,92x | 96 % | sí |
-| 5.000 | 0,4 FPS | 0,8 FPS | 1,96x | 98 % | sí |
+| 1.000 | 40,8 FPS | 51,9 FPS | 1,27x | 16 % | sí |
+| 3.000 | 16,7 FPS | 22,8 FPS | 1,37x | 17 % | sí |
+| 5.000 | 10,8 FPS | 18,0 FPS | 1,67x | 21 % | sí |
 
-Lectura: el paralelismo rinde cuando cada hormiga tiene trabajo pesado (feromonas). Sin feromonas, con 1.000 hormigas no hay ganancia: enviar los datos a los workers y traerlos de vuelta cuesta casi lo mismo que calcular, y `aplicar_resultados` sigue siendo secuencial (ley de Amdahl). Los FPS absolutos son bajos por el costo de `seguir_feromonas` (ver pendientes); la mejora medible al activar el paralelismo, que es lo que evalúa la rúbrica, sí aparece.
+Arranque del pool (costo único, no incluido en los FPS): entre 367 y 544 ms.
 
-## Pendientes para coordinar
+Lectura:
 
-- **Mike — costo de `seguir_feromonas`:** con 2.000 feromonas, el costo hormigas × feromonas domina todo. Con 5.000 hormigas un frame tarda más de 1 s incluso en paralelo. Una cuadrícula espacial en `crear_vista`, como propone el Anexo A, lo resolvería sin cambiar ninguna firma ni tocar `engine/`.
-- **Mike — `models/` y `logic/` reales:** las carpetas incluidas aquí son una versión provisional escrita siguiendo el Anexo A, solo para probar el motor. Se reemplazan por las de Mike y se vuelve a correr `pytest`.
-- **Mike — firma `update(state, events, ...)`:** la rúbrica menciona `events`; el Anexo A todavía no lo tiene.
-- **Tamara:** guarda `if __name__ == "__main__"` en `main.py` y el `with abrir_motor()` alrededor del bucle.
+- En los tres tamaños el modo paralelo es más rápido y el estado final es idéntico al secuencial.
+- La mejora crece con la cantidad de hormigas: hay más trabajo útil que repartir frente al costo fijo de enviar los segmentos a los workers y traer los resultados.
+- La eficiencia es baja (16–21 %) porque con la lógica definitiva cada hormiga se calcula rápido: serializar los datos entre procesos pesa casi tanto como el cálculo, y `aplicar_resultados` corre en un solo proceso (ley de Amdahl).
+- En estos 20 frames todavía no hay feromonas (`fer. 0`). Con más carga por hormiga el speedup sube. Para medir ese caso: `python -m engine.benchmark --precalentar 120 --ticks 20 --markdown tabla_carga.md`.
+- Estos FPS son solo de la simulación; en la interfaz, el dibujo de Pygame los reduce.
+
+## Pendientes
+
+- **Tamara:** `main.py` con la guarda `if __name__ == "__main__":` y el `with abrir_motor()` alrededor del bucle (obligatorio con `spawn`).
+- **Equipo:** repetir el benchmark en la máquina que se use para la defensa en video.
